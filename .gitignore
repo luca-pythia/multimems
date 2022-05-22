@@ -1,0 +1,13 @@
+# Ignore checkpoints anywehere in tge repo
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Ignore the .DS_Store file in the macos file system
+*.DS_store
+
+# editors and IDEs
+*.sw[a-z]
+*~
+.idea
+.vscode
+

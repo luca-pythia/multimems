@@ -7,6 +7,8 @@ from collections import OrderedDict
 
 from .correlation import *
 from .multi_dim_gle import *
+from .gle_2d_sim import *
+from .get_nd_force_array import *
 
 
 def ver():

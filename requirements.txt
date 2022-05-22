@@ -2,8 +2,6 @@ matplotlib
 numpy
 numba
 pandas
-datetime
-yfinance
 cvxopt
 scipy
 ndsplines

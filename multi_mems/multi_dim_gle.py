@@ -16,7 +16,7 @@ class multi_dim_gle:
        for a network of trajectories (xva-dataframes)
     """
     
-    def __init__(self, trunc, bins = 32, kT =2.494, free_energy = 'MV', verbose = True,symm_matr = False,physical = True,diagonal_mass = True,force_funcs = None):
+    def __init__(self, trunc, bins = 32, kT =2.494, free_energy = 'MV', verbose = True,plot = False,symm_matr = False,physical = True,diagonal_mass = True,force_funcs = None):
         
         self.trunc = trunc #depth of memory kernel entries
         self.bins = bins #number of bins for the histogram (potential-extraction)
@@ -25,10 +25,52 @@ class multi_dim_gle:
         self.physical = physical
         self.symm_matr = symm_matr #we assume that v_acf on off-diagonal entries are the same (12 = 21, etc.)
         #self.kT_init = kT #ony for physical
-        self.free_energy = free_energy #enables inclusion of mean force team in GLE, #if MV: Conditional Probability, #if True: Additional Assumption U(x1,x2,...) = U(x1) + U(x2) + ...
+        self.free_energy = free_energy #enables inclusion of mean force team in GLE, #if MV: Conditional Probability, #if ADD: Additional Assumption U(x1,x2,...) = U(x1) + U(x2) + ...
         self.verbose = verbose
+        self.plot = plot #option to plot the resuls by matplotlib
         self.diagonal_mass = diagonal_mass #avoids additional coupling between observables
         self.force_funcs = force_funcs #if we already know the analytical shape of the potential landscape, we do not need to compute and interpolate it via the data
+        
+        
+        
+        
+    def compute_free_energy_landscape(self,xvaf):
+        self.n_dim = xvaf.filter(regex='^x',axis=1).shape[1]
+
+        if self.free_energy == 'ADD': #1D Potentials
+            pos_arrays = np.zeros((self.n_dim,self.bins))
+            fe_arrays = np.zeros((self.n_dim,self.bins))
+            for i in range(0, self.n_dim): 
+                    pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(i+1)])
+                    pos_arrays[i] = pos
+                    fe_arrays[i] = fe
+                    
+                    if self.plot:
+                        plt.title(r'$x_' + str(i+1)+'$')
+                        plt.plot(pos,fe,color='k')
+                        plt.xlabel(r'$x_' + str(i+1)+'$')
+                        plt.ylabel('$U/k_BT$')
+                        plt.show()
+                        
+        elif self.free_energy == 'MV':
+            xx = xvaf.filter(regex='^x',axis=1)
+            xx = xx.to_numpy()
+            pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
+            pos_arrays = pos
+            fe_arrays = fe
+            
+            if self.plot and self.n_dim == 2:
+                pos1 = pos.T[0]
+                pos2 = pos.T[1]
+                plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
+                plt.colorbar()
+                plt.xlabel(r'$x_1$')
+                plt.ylabel(r'$x_2$')
+
+                plt.show()    
+            
+        return pos_arrays,fe_arrays
+    
     def compute_correlations_G(self,xvaf): #all columns of xvaf has to include the same time steps!!
         #if mkl: #uses faster correlation function, but need to installed first
             #correlation = correlation_fast
@@ -55,7 +97,7 @@ class multi_dim_gle:
                 v_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax] #attention i and j are switched in off-diagonal!
         
         force_funcs = []
-        if self.free_energy == True: #additive composition
+        if self.free_energy == 'ADD': #additive composition
             
             self.kT_1D = 1
             for i in range(0,self.n_dim):
@@ -88,14 +130,14 @@ class multi_dim_gle:
             xx = xx.to_numpy()
             
             #if self.n_dim == 2: #not fixed yet!!
-                #pos1,pos2,hist,fe,force1,force2,force_fine1,force2,force_array = self.extract_free_energy_2D(xvaf['x_1'].values,xvaf['x_2'].values, plot = False)
+                #pos1,pos2,hist,fe,force1,force2,force_fine1,force2,force_array = self.extract_free_energy_2D(xvaf['x_1'].values,xvaf['x_2'].values)
                    
             #else:
             
             if self.force_funcs is None:
                 #this nd splines function is from https://github.com/kb-press/ndsplines
 
-                pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx,plot = False)
+                pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
             else: #use a previously calculated free energy landscape
                 #pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs= self.get_du_nD(self.fe_array[0],self.fe_array[1])
                 force_funcs = self.force_funcs
@@ -119,12 +161,60 @@ class multi_dim_gle:
                 for j in range(0, self.n_dim): 
                     if i != j:
                         v_corr_matrix.T[i][j] = (v_corr_matrix.T[i][j] + v_corr_matrix.T[j][i])/2
+                        
+                        
+        if self.plot:
+            if self.verbose:
+                print('plot correlation matrices...')
+            if self.n_dim == 1:
+                plt.plot(t,v_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{vv}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+                
+                plt.plot(t,xU_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{Fx}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+
+            else:
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,v_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{vv}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+                
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,xU_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{Fx}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
                     
         return t, v_corr_matrix,xU_corr_matrix, force_funcs
     
     
     #the memory matrix extraction
-    def compute_kernel_mat_G(self,v_corr_matrix,xU_corr_matrix,first_kind = True, plot = False, d  = 0):
+    def compute_kernel_mat_G(self,v_corr_matrix,xU_corr_matrix,first_kind = True, d  = 0,multiprocessing=1):
         tmax=int(self.trunc/self.dt)
         ikernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
         kernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
@@ -165,8 +255,10 @@ class multi_dim_gle:
 
                 if first_kind:#recommended!!
 
-                    ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
-                    #ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=3) #faster through parallelization
+                    if multiprocessing == 1:
+                        ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                    else:
+                        ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
 
                     ikernel_matrix[i] -= np.dot(self.mass_matrix,v_corr_matrix[i]-v_corr_matrix[0])/self.dt
 
@@ -181,8 +273,10 @@ class multi_dim_gle:
 
 
                 else:
-                    ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
-                    #ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=3)
+                    if multiprocessing == 1:
+                        ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                    else:
+                        ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
 
                     ikernel_matrix[i] -= np.dot(np.dot(self.kT,xU_corr_matrix[0]),np.dot(np.linalg.inv(v_corr_matrix[0]),v_corr_matrix[i]))/self.dt
 
@@ -215,7 +309,7 @@ class multi_dim_gle:
 
 
 
-        if plot:
+        if self.plot:
             if self.verbose:
                 print('plot kernel entries...')
             if self.n_dim == 1:
@@ -246,7 +340,7 @@ class multi_dim_gle:
         return t, ikernel_matrix, kernel_matrix
 
     #https://github.com/kb-press/ndsplines
-    def extract_free_energy_nD(self,xx, plot = False):
+    def extract_free_energy_nD(self,xx):
         self.n_dim = xx.shape[1]
 
         #multi_d histogram
@@ -290,15 +384,6 @@ class multi_dim_gle:
         for i in range(self.n_dim):
             deriv_interp = interp.derivative(i) #derivative of potential in ith direction
             force_funcs.append(deriv_interp)
-
-        if plot:
-            if self.n_dim == 2:
-                #pos1 = pos_fine.T[0]
-                #pos2 = pos_fine.T[1]
-                pos1 = pos.T[0]
-                pos2 = pos.T[1]
-                plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
-                plt.colorbar()
 
         return pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs
     
@@ -356,10 +441,10 @@ class multi_dim_gle:
         force_fine=interpolate.splev(xfine, fe_spline, der=1)
         force_array=interpolate.splev(x, fe_spline, der=1)
 
-        return pos, hist, fe_spline, xfine, fe_fine, force_array
+        return pos, hist, fe, xfine, fe_fine, force_array
     
     
-    def extract_free_energy_2D(self,x1,x2, plot = False):
+    def extract_free_energy_2D(self,x1,x2):
         
         hist, pos1, pos2 = np.histogram2d(x1, x2, bins=(self.bins, self.bins))
 
@@ -401,7 +486,7 @@ class multi_dim_gle:
         return pos1,pos2,hist,fe,force1,force2,force_func1,force_func2,force_array
 
             
-        if plot:
+        if self.plot:
             plt.imshow(fe, cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
             plt.xlabel('x1')
             plt.ylabel('x2')
@@ -439,7 +524,7 @@ class multi_dim_gle:
     
     #Jan's method (has to modified!!!)
 
-    def compute_kernel_mat_direct(self,xvaf,first_kind = False,diagonal_mass = True, plot = False):
+    def compute_kernel_mat_direct(self,xvaf,first_kind = False,diagonal_mass = True):
         self.n_dim = int(xvaf.shape[1]/4)
         
         self.dt = xvaf.index[1] - xvaf.index[0]
@@ -515,7 +600,7 @@ class multi_dim_gle:
                 print('calculate multi-variate free energy landscape')
             xx = xvaf.filter(regex='^x',axis=1)
             xx = xx.to_numpy()
-            pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx,plot = False)
+            pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
             
             dU = force_funcs
             force_array = np.zeros((len(xvaf),self.n_dim))
@@ -564,7 +649,7 @@ class multi_dim_gle:
                 kernel_matrix[i] = np.matmul(kernel_matrix[i],prefac_mat)
         t = np.arange(0,len(kernel_matrix)*self.dt,self.dt)
         
-        if plot:
+        if self.plot:
             if self.verbose:
                 print('plot kernel entries...')
             if self.n_dim == 1:
