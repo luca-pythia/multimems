@@ -102,7 +102,6 @@ class multi_dim_gle:
             self.kT_1D = 1
             for i in range(0,self.n_dim):
                 for j in range(0, self.n_dim): 
-                    pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(i+1)])
                     
                     #xva = xvaf.filter(regex=str(i+1),axis=1)
                     #xva.columns = ['t', 'x', 'v', 'a']
@@ -117,9 +116,12 @@ class multi_dim_gle:
                     #dU=mem.dU
                     #force_funcs.append(dU)
                     #force_array = dU(xvaf['x_' + str(j+1)])
-                    #xU_corr_matrix.T[i][j] = correlation(xvaf['x_' + str(i+1)],force_array)[:tmax]
-                    xU_corr_matrix.T[j][i] = correlation(force_array,xvaf['x_' + str(j+1)])[:tmax]
                     
+                    pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(i+1)])
+                    xU_corr_matrix.T[j][i] = correlation(force_array,xvaf['x_' + str(j+1)])[:tmax]
+                    #pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(j+1)])
+                    #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array)[:tmax]
+
         elif self.free_energy == 'MV':
             
             if self.verbose:
@@ -152,7 +154,8 @@ class multi_dim_gle:
                 for j in range(0, self.n_dim): 
                     #xU_corr_matrix.T[i][j] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
                     #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
-                    xU_corr_matrix.T[j][i] = correlation(force_array.T[i],xvaf['x_' + str(j+1)])[:tmax]
+                    xU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['x_' + str(i+1)])[:tmax]
+                    #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
                              
         t = np.arange(0,len(v_corr_matrix)*self.dt,self.dt)
         

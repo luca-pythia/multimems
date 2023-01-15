@@ -1,6 +1,6 @@
 # Multimens
 
-Python 3 tool suite for the computation of memory kernel matricess from a set of time series data.
+Python 3 tool suite for the computation of memory kernel matrices from a set of time series data.
 
 To get started, run
 
