@@ -93,8 +93,10 @@ def extract_free_energy(x):
     #one-dimensional
     hist,edges=np.histogram(x, bins=100, density=True)
     pos =(edges[1:]+edges[:-1])/2
-    hist = hist[np.nonzero(hist)]
+    
     pos = pos[np.nonzero(hist)]
+    hist = hist[np.nonzero(hist)]
+    
     fe=-np.log(hist[np.nonzero(hist)]) #in units of kT!
 
     fe_spline=interpolate.splrep(pos, fe, s=0, per=0)

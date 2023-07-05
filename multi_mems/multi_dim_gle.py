@@ -431,8 +431,10 @@ class multi_dim_gle:
         #one-dimensional, we assume the potential landscape to be additive, i.e. U(x) = U(x1) + ..+ U(xn)
         hist,edges=np.histogram(x, bins=self.bins, density=True)
         pos =(edges[1:]+edges[:-1])/2
-        hist = hist[np.nonzero(hist)]
+        
         pos = pos[np.nonzero(hist)]
+        hist = hist[np.nonzero(hist)]
+        
         fe=-np.log(hist[np.nonzero(hist)])
         
 
