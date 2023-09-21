@@ -21,7 +21,7 @@ def sqrtm(X):
     
 
 @njit()
-def integrate_gle_multi_dim_exp(x0,v0, y0,ks, gammas, mass,nsteps, dt, kT,force_bins,force_matrix,force_max,force_min,x1max=1.20143,x2max=2.8043226,x1min=0.274031,x2min=0.31225377,fr_mode=1,uncorr_fr = True):
+def integrate_gle_multi_dim_exp(x0,v0, y0,ks, gammas, mass,nsteps, dt, kT,force_bins,force_matrix,force_max,force_min,x1max=1.20143,x2max=2.8043226,x1min=0.274031,x2min=0.31225377,fr_mode=1,uncorr_fr = False):
     
     n_dim = x0.shape[0]
     n_exp = len(gammas)
