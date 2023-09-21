@@ -347,7 +347,7 @@ class multi_dim_gle:
         self.n_dim = xx.shape[1]
 
         #multi_d histogram
-        hist = np.histogramdd(xx, bins=self.bins)
+        hist = np.histogramdd(xx, bins=self.bins,density=True)
         pos = np.zeros((self.bins,self.n_dim))
         for i in range(self.n_dim):
 
@@ -356,6 +356,7 @@ class multi_dim_gle:
 
         fe=-np.log(hist)
         fe[np.where(fe == np.inf)] = np.nanmax(fe[fe != np.inf]) #in general zero
+        fe-=np.min(fe)
 
         # generate grid of independent variables
         pos_list = pos.T.tolist()
