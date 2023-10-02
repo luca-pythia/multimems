@@ -68,7 +68,7 @@ class multi_dim_gle:
                 plt.ylabel(r'$x_2$')
 
                 plt.show()    
-            
+
         return pos_arrays,fe_arrays
     
     def compute_correlations_G(self,xvaf): #all columns of xvaf has to include the same time steps!!
@@ -156,7 +156,23 @@ class multi_dim_gle:
                     #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
                     xU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['x_' + str(i+1)])[:tmax]
                     #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
-                             
+
+        elif self.free_energy == "Mori":
+            if self.verbose:
+                print('calculate linear forces in Mori-GLE...')
+            
+            for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
+                for j in range(0,self.n_dim):
+                    xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+
+            self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(xU_corr_matrix[0]))
+            if self.verbose:
+                print('constant k-matrix:') #note we do not use position-dependent masses!!
+                print(self.k_matrix)
+
+            for i in range(tmax):
+                xU_corr_matrix[i] = np.dot(self.k_matrix,xU_corr_matrix[i])
+                         
         t = np.arange(0,len(v_corr_matrix)*self.dt,self.dt)
         
         if self.symm_matr:
@@ -563,7 +579,7 @@ class multi_dim_gle:
             
             #self.mass_matrix/=self.mass_matrix
             self.mass_matrix = np.eye(self.n_dim)
-            
+
             self.kT = v_corr_matrix[0]
             if self.verbose:
                 print('use kT from v-acf')
