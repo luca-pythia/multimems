@@ -156,8 +156,8 @@ class multi_dim_gle:
             for i in range(0,self.n_dim):
                 for j in range(0, self.n_dim): 
                     #xU_corr_matrix.T[i][j] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
-                    #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
-                    xU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['x_' + str(i+1)])[:tmax]
+                    #xU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['x_' + str(i+1)])[:tmax]
+                    xU_corr_matrix.T[j][i] = correlation(force_array.T[i],xvaf['x_' + str(j+1)])[:tmax]
                     #xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)],force_array.T[j])[:tmax]
 
         elif self.free_energy == "Mori":
