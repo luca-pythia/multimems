@@ -227,7 +227,8 @@ class multi_dim_gle:
         self.mass_matrix = self.kT*np.linalg.inv(v_corr_matrix[0])
         if self.physical == False:
             
-            self.mass_matrix/=self.mass_matrix
+            #self.mass_matrix/=self.mass_matrix
+            self.mass_matrix = np.eye(self.n_dim)
             self.kT = v_corr_matrix[0]
             if self.verbose:
                 print('use kT from v-acf')
@@ -560,7 +561,9 @@ class multi_dim_gle:
         self.kT_1D = 1
         if self.physical == False:
             
-            mass_matrix/=mass_matrix
+            #self.mass_matrix/=self.mass_matrix
+            self.mass_matrix = np.eye(self.n_dim)
+            
             self.kT = v_corr_matrix[0]
             if self.verbose:
                 print('use kT from v-acf')
