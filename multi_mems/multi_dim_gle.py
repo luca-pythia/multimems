@@ -144,7 +144,7 @@ class multi_dim_gle:
 
                 pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
             else: #use a previously calculated free energy landscape
-                #pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs= self.get_du_nD(self.fe_array[0],self.fe_array[1])
+                #mesh,interp,mesh_fine,fe_fine,force_funcs= self.get_du_nD(self.fe_array[0],self.fe_array[1])
                 force_funcs = self.force_funcs
             dU = force_funcs
             force_array = np.zeros((len(xvaf),self.n_dim))
@@ -417,7 +417,7 @@ class multi_dim_gle:
         fe[np.where(fe == np.inf)] = np.nanmax(fe[fe != np.inf]) #in general zero
 
         # generate grid of independent variables
-        #pos_list = pos.T.tolist()
+        pos_list = pos.T.tolist()
         mesh= np.meshgrid(*pos_list,indexing='ij')
         mesh = np.vstack(([x.ravel() for x in mesh]))
         mesh = np.array(mesh).T
@@ -446,7 +446,7 @@ class multi_dim_gle:
             deriv_interp = interp.derivative(i) #derivative of potential in ith direction
             force_funcs.append(deriv_interp)
 
-        return pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs
+        return mesh,interp,mesh_fine,fe_fine,force_funcs
     
     def extract_free_energy(self,x): 
         #one-dimensional, we assume the potential landscape to be additive, i.e. U(x) = U(x1) + ..+ U(xn)
@@ -618,8 +618,10 @@ class multi_dim_gle:
                     force_funcs.append(dU)
                     force_array = dU(xvaf['x_' + str(j+1)])
                     
-                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array)[:tmax]
-                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array)[:tmax]
+                    #vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array)[:tmax]
+                    #aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array)[:tmax]
+                    vU_corr_matrix.T[j][i] = correlation(force_array,xvaf['v_' + str(i+1)])[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(force_array,xvaf['a_' + str(i+1)])[:tmax]
 
         if self.free_energy == 'MV':
            
@@ -637,8 +639,10 @@ class multi_dim_gle:
                 
             for i in range(0,self.n_dim):
                 for j in range(0, self.n_dim): 
-                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array.T[j])[:tmax]
-                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array.T[j])[:tmax]
+                    #vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array.T[j])[:tmax]
+                    #aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array.T[j])[:tmax]
+                    vU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['v_' + str(i+1)])[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['a_' + str(i+1)])[:tmax]
                     
         if self.verbose:            
             print('constant mass matrix:')
