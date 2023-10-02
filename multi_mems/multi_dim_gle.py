@@ -68,7 +68,10 @@ class multi_dim_gle:
                 plt.ylabel(r'$x_2$')
 
                 plt.show()    
-
+        else:
+            print('no free energy landscape calculated')
+            pos_arrays = None
+            fe_arrays = None
         return pos_arrays,fe_arrays
     
     def compute_correlations_G(self,xvaf): #all columns of xvaf has to include the same time steps!!
