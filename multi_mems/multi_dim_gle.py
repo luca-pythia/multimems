@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import interpolate
-from scipy import optimize
+from scipy import interpolate, integrate, optimize
 
 from multi_mems import *
 from einsumt import einsumt as einsum
@@ -16,7 +15,7 @@ class multi_dim_gle:
        for a network of trajectories (xva-dataframes)
     """
     
-    def __init__(self, trunc, bins = 32, kT =2.494, free_energy = 'MV', verbose = True,plot = False,symm_matr = False,physical = True,diagonal_mass = True,force_funcs = None):
+    def __init__(self, trunc, bins = 32, kT =2.494, free_energy = 'MV', verbose = True,plot = False,symm_matr = False,physical = True,diagonal_mass =False,force_funcs = None):
         
         self.trunc = trunc #depth of memory kernel entries
         self.bins = bins #number of bins for the histogram (potential-extraction)
@@ -74,6 +73,7 @@ class multi_dim_gle:
             fe_arrays = None
         return pos_arrays,fe_arrays
     
+    #https://www.pnas.org/doi/abs/10.1073/pnas.2023856118
     def compute_correlations_G(self,xvaf): #all columns of xvaf has to include the same time steps!!
         #if mkl: #uses faster correlation function, but need to installed first
             #correlation = correlation_fast
@@ -183,7 +183,8 @@ class multi_dim_gle:
                 for j in range(0, self.n_dim): 
                     if i != j:
                         v_corr_matrix.T[i][j] = (v_corr_matrix.T[i][j] + v_corr_matrix.T[j][i])/2
-                        
+                        v_corr_matrix.T[j][i] = v_corr_matrix.T[i][j]
+
                         
         if self.plot:
             if self.verbose:
@@ -236,6 +237,7 @@ class multi_dim_gle:
     
     
     #the memory matrix extraction
+    #https://www.pnas.org/doi/abs/10.1073/pnas.2023856118
     def compute_kernel_mat_G(self,v_corr_matrix,xU_corr_matrix,first_kind = True, d  = 0,multiprocessing=1):
         tmax=int(self.trunc/self.dt)
         ikernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
@@ -280,8 +282,11 @@ class multi_dim_gle:
 
                     if multiprocessing == 1:
                         ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                        #ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i],v_corr_matrix[1:i][::-1])
+
                     else:
                         ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
+                        #ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i],v_corr_matrix[1:i][::-1],pool=multiprocessing) #faster through parallelization
 
                     ikernel_matrix[i] -= np.dot(self.mass_matrix,v_corr_matrix[i]-v_corr_matrix[0])/self.dt
 
@@ -298,8 +303,11 @@ class multi_dim_gle:
                 else:
                     if multiprocessing == 1:
                         ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                        #ikernel_matrix[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix[1:i],v_corr_matrix[1:i][::-1])
+
                     else:
                         ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
+                        #ikernel_matrix[i] -= einsum('ijk,ikl->jl',ikernel_matrix[1:i],v_corr_matrix[1:i][::-1],pool=multiprocessing) #faster through parallelization
 
                     ikernel_matrix[i] -= np.dot(np.dot(self.kT,xU_corr_matrix[0]),np.dot(np.linalg.inv(v_corr_matrix[0]),v_corr_matrix[i]))/self.dt
 
@@ -479,7 +487,7 @@ class multi_dim_gle:
         pos2 =(pos2[1:]+pos2[:-1])/2
         #hist = hist[np.nonzero(hist)]
         #pos = pos[np.nonzero(hist)]
-        fe=-np.log(hist)*self.kT
+        fe=-np.log(hist)#*self.kT
         fe[np.where(fe == np.inf)] = np.nanmax(fe[fe != np.inf])
 
         forces = []
@@ -546,17 +554,23 @@ class multi_dim_gle:
                 x.T[i][j][start:end]= spl(tt)
                 
         return x
-#--------------------------------------------------------------------------------
-    
-    #Jan's method (has to modified!!!)
 
-    def compute_kernel_mat_direct(self,xvaf,first_kind = False,diagonal_mass = True):
-        self.n_dim = int(xvaf.shape[1]/4)
+
+    #Jan Daldrop's method 
+    #https://www.pnas.org/doi/abs/10.1073/pnas.1722327115
+
+    def compute_correlations_direct(self,xvaf): #all columns of xvaf has to include the same time steps!!
+        #if mkl: #uses faster correlation function, but need to installed first
+            #correlation = correlation_fast
+        #self.n_dim = int(xvaf.shape[1]/4)
+        self.n_dim = xvaf.filter(regex='^x',axis=1).shape[1]
         
         self.dt = xvaf.index[1] - xvaf.index[0]
+        
         if self.verbose:
             print('dimension of system: ' + str(self.n_dim))
             print('found dt = ' + str(self.dt))
+            
         tmax=int(self.trunc/self.dt)
         
         if self.verbose:
@@ -569,20 +583,229 @@ class multi_dim_gle:
         vU_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
         aU_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
         
-        
-        for i in range(0,self.n_dim):
+        for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
             for j in range(0,self.n_dim):
-                v_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax]
-                a_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['a_' + str(j+1)])[:tmax]
-                va_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax]
+
+                v_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax] #attention i and j are switched in off-diagonal!
+                a_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['a_' + str(j+1)])[:tmax] #attention i and j are switched in off-diagonal!
+                #va_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax] #attention i and j are switched in off-diagonal!
+                va_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['a_' + str(j+1)])[:tmax] #attention i and j are switched in off-diagonal!
+
+        force_funcs = []
+        if self.free_energy == 'ADD': #additive composition
+            
+            self.kT_1D = 1
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim): 
+                    
+                    #pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(i+1)])
+                    #vU_corr_matrix.T[j][i] = correlation(force_array,xvaf['v_' + str(j+1)])[:tmax]
+                    #aU_corr_matrix.T[j][i] = correlation(force_array,xvaf['a_' + str(j+1)])[:tmax]
+
+                    pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(j+1)])
+                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array)[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array)[:tmax]
+
+                   
+
+        elif self.free_energy == 'MV':
+            
+            if self.verbose:
+                print('calculate multi-variate free energy landscape')
+            
+                
+            xx = xvaf.filter(regex='^x',axis=1)
+            xx = xx.to_numpy()
+            
+            #if self.n_dim == 2: #not fixed yet!!
+                #pos1,pos2,hist,fe,force1,force2,force_fine1,force2,force_array = self.extract_free_energy_2D(xvaf['x_1'].values,xvaf['x_2'].values)
+                   
+            #else:
+            
+            if self.force_funcs is None:
+                #this nd splines function is from https://github.com/kb-press/ndsplines
+
+                pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
+            else: #use a previously calculated free energy landscape
+                #mesh,interp,mesh_fine,fe_fine,force_funcs= self.get_du_nD(self.fe_array[0],self.fe_array[1])
+                force_funcs = self.force_funcs
+            dU = force_funcs
+            force_array = np.zeros((len(xvaf),self.n_dim))
+            
+            for j in range(self.n_dim): #maybe memory issues in ndsplines
+                force_array.T[j] = dU[j](xx).reshape(len(xx))
+            
+            
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim): 
+                    #vU_corr_matrix.T[j][i] = correlation(force_array.T[i],xvaf['v_' + str(j+1)])[:tmax]
+                    #aU_corr_matrix.T[j][i] = correlation(force_array.T[i],xvaf['a_' + str(j+1)])[:tmax]
+                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array.T[j],)[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array.T[j],)[:tmax]
+
+        elif self.free_energy == "Mori":
+
+            x_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
+
+            if self.verbose:
+                print('calculate linear forces in Mori-GLE...')
+            
+            for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
+                for j in range(0,self.n_dim):
+                    x_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+
+            self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(x_corr_matrix[0]))
+            if self.verbose:
+                print('constant k-matrix:') #note we do not use position-dependent masses!!
+                print(self.k_matrix)
+
+            for i in range(tmax):
+                vU_corr_matrix[i] = np.dot(self.k_matrix,vU_corr_matrix[i])
+                aU_corr_matrix[i] = np.dot(self.k_matrix,aU_corr_matrix[i])
+   
+        t = np.arange(0,len(v_corr_matrix)*self.dt,self.dt)
         
-        mass_matrix = self.kT*np.linalg.inv(v_corr_matrix[0])
-        self.kT_1D = 1
+        if self.symm_matr:
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim): 
+                    if i != j:
+                        v_corr_matrix.T[i][j] = (v_corr_matrix.T[i][j] + v_corr_matrix.T[j][i])/2
+                        a_corr_matrix.T[i][j] = (a_corr_matrix.T[i][j] + a_corr_matrix.T[j][i])/2
+                        va_corr_matrix.T[i][j] = (va_corr_matrix.T[i][j] + va_corr_matrix.T[j][i])/2
+
+                        v_corr_matrix.T[j][i] = v_corr_matrix.T[i][j] 
+                        a_corr_matrix.T[j][i] = a_corr_matrix.T[i][j] 
+                        va_corr_matrix.T[j][i] = va_corr_matrix.T[i][j] 
+                        
+                        
+        if self.plot:
+            if self.verbose:
+                print('plot correlation matrices...')
+            if self.n_dim == 1:
+                plt.plot(t,v_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{vv}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+                
+                plt.plot(t,a_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{aa}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+
+                plt.plot(t,va_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{va}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+
+                plt.plot(t,vU_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{Fv}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+
+                plt.plot(t,aU_corr_matrix.T[0][0], color = 'k')
+                plt.xscale('log')
+                plt.ylabel(r'$C^{Fa}$ [a.u.]')
+                plt.xlabel('t')
+                plt.axhline(y = 0, linestyle = '--', color = 'k')
+                plt.show()
+
+            else:
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,v_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{vv}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,va_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{va}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,a_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{aa}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+                
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,vU_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{vF}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+
+                fig, ax = plt.subplots(self.n_dim,self.n_dim, figsize=(5*self.n_dim,3*self.n_dim))
+                plt.subplots_adjust(wspace = 0.4)
+                plt.subplots_adjust(hspace = 0.3)
+                for i in range(0,self.n_dim):
+                    for j in range(0, self.n_dim): 
+                        ax[i][j].plot(t,aU_corr_matrix.T[j][i], color = 'k')
+                        ax[i][j].set_xscale('log')
+                        ax[i][j].set_ylabel(r'$C^{aF}_{%s%s}$ [a.u.]' % (i+1, j+1))
+                        ax[i][j].set_xlabel('t')
+
+                        ax[i][j].axhline(y = 0, linestyle = '--', color = 'k')
+
+                plt.show()
+                    
+        return t, v_corr_matrix,va_corr_matrix,a_corr_matrix,vU_corr_matrix,aU_corr_matrix, force_funcs
+
+    def compute_kernel_mat_direct(self,v_corr_matrix,va_corr_matrix,a_corr_matrix,vU_corr_matrix,aU_corr_matrix,first_kind = True,multiprocessing=1,correct=True):
+        
+    
+        tmax=int(self.trunc/self.dt)
+        ikernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
+        kernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
+        t = np.arange(0,len(kernel_matrix)*self.dt,self.dt)
+        
+        
+        self.mass_matrix = self.kT*np.linalg.inv(v_corr_matrix[0])
         if self.physical == False:
             
             #self.mass_matrix/=self.mass_matrix
             self.mass_matrix = np.eye(self.n_dim)
-
             self.kT = v_corr_matrix[0]
             if self.verbose:
                 print('use kT from v-acf')
@@ -591,65 +814,22 @@ class multi_dim_gle:
             print('used kT')
             print(self.kT)
             
-        if diagonal_mass : #avoid additional coupling
+        if self.diagonal_mass : #avoid additional coupling
             if self.verbose:
                 print('use diagonal mass matrix')
             for i in range(0,self.n_dim):
                 for j in range(0, self.n_dim):
                     if i != j:
-                        mass_matrix[i][j] = 0
+                        self.mass_matrix[i][j] = 0
+        
+        if self.verbose:
+            print('constant mass matrix:') #note we do not use position-dependent masses!!
+            print(self.mass_matrix)
+        
             
-        force_funcs = []
-        if self.free_energy:
-            
-            for i in range(0,self.n_dim):
-                for j in range(0, self.n_dim): 
-                    pos, hist, fe, xfine, fe_fine, force_array = self.extract_free_energy(xvaf['x_' + str(j+1)])
-                    
-                    xva = xvaf.filter(regex=str(i+1),axis=1)
-                    xva.columns = ['t', 'x', 'v', 'a']
-                    xva['t'] = np.arange(len(xva))*self.dt
-                    #xf=xframe(xvaf['x_' + str(j+1)],xvaf.index,fix_time=True)
-                    #xva=compute_va(xf,correct_jumps=True)
-                    mem = Igle(xva, kT = self.kT_1D, trunc = self.trunc,saveall = False,verbose = False)    
-                    mem.compute_fe(bins=self.bins)
-
-                    dU=mem.dU
-                    force_funcs.append(dU)
-                    force_array = dU(xvaf['x_' + str(j+1)])
-                    
-                    #vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array)[:tmax]
-                    #aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array)[:tmax]
-                    vU_corr_matrix.T[j][i] = correlation(force_array,xvaf['v_' + str(i+1)])[:tmax]
-                    aU_corr_matrix.T[j][i] = correlation(force_array,xvaf['a_' + str(i+1)])[:tmax]
-
-        if self.free_energy == 'MV':
-           
-            self.kT = self.kT_init
-            if self.verbose:
-                print('calculate multi-variate free energy landscape')
-            xx = xvaf.filter(regex='^x',axis=1)
-            xx = xx.to_numpy()
-            pos,hist,fe,mesh,interp,mesh_fine,fe_fine,force_funcs = self.extract_free_energy_nD(xx)
-            
-            dU = force_funcs
-            force_array = np.zeros((len(xvaf),self.n_dim))
-            for j in range(self.n_dim): #maybe memory issues in ndsplines
-                force_array.T[j] = dU[j](xx)
-                
-            for i in range(0,self.n_dim):
-                for j in range(0, self.n_dim): 
-                    #vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],force_array.T[j])[:tmax]
-                    #aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],force_array.T[j])[:tmax]
-                    vU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['v_' + str(i+1)])[:tmax]
-                    aU_corr_matrix.T[j][i] = correlation(force_array.T[j],xvaf['a_' + str(i+1)])[:tmax]
-                    
-        if self.verbose:            
-            print('constant mass matrix:')
-            print(mass_matrix)
-
-        kernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
-        kernel_matrix[0] = np.dot(np.dot(mass_matrix,a_corr_matrix[0]) + np.dot(self.kT,aU_corr_matrix[0]),np.linalg.inv(v_corr_matrix[0]))
+        #aU_corr_matrix*=-1
+        kernel_matrix[0] = np.dot(np.dot(self.mass_matrix,a_corr_matrix[0]) + np.dot(self.kT,aU_corr_matrix[0]),np.linalg.inv(v_corr_matrix[0]))
+        #kernel_matrix[0] = np.dot(np.dot(self.mass_matrix,a_corr_matrix[0]) - np.dot(self.kT,aU_corr_matrix[0]),np.linalg.inv(v_corr_matrix[0]))
 
         if self.verbose:
             print('initial memory matrix:')
@@ -660,26 +840,45 @@ class multi_dim_gle:
             print('extract memory kernel entries...')
         for i in range(1,len(kernel_matrix)):
             if first_kind:
-                #kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
-                kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                if multiprocessing == 1:
+                    kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                    #kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i],v_corr_matrix[1:i][::-1])
 
-                kernel_matrix[i] += np.matmul(mass_matrix,va_corr_matrix[i])/self.dt 
+                else:
+                    kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
+                    #kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i],v_corr_matrix[1:i][::-1],pool=multiprocessing) #faster through parallelization
+
+                kernel_matrix[i] += np.dot(self.mass_matrix,va_corr_matrix[i])/self.dt 
 
                 kernel_matrix[i] += np.dot(self.kT,vU_corr_matrix[i])/self.dt 
-                kernel_matrix[i] +=np.matmul(kernel_matrix[0],v_corr_matrix[i])/2
+                kernel_matrix[i] +=np.dot(kernel_matrix[0],v_corr_matrix[i])/2
 
-                kernel_matrix[i] = np.matmul(kernel_matrix[i],prefac_mat)*-2
+                kernel_matrix[i] = np.dot(kernel_matrix[i],prefac_mat)*-2
             else:#recommended!!
                 prefac_mat = np.linalg.inv(v_corr_matrix[0] - self.dt*0.5*va_corr_matrix[0])
-                #kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
-                kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
-                
-                kernel_matrix[i] += self.dt*np.matmul(kernel_matrix[0],va_corr_matrix[i])/2
-                kernel_matrix[i] += np.matmul(mass_matrix,a_corr_matrix[i]) 
+                if multiprocessing == 1:
+                    kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
+                    #kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i],v_corr_matrix[1:i][::-1])
+
+                else:
+                    kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1],pool=multiprocessing) #faster through parallelization
+                    #kernel_matrix[i] += einsum('ijk,ikl->jl',kernel_matrix[1:i],v_corr_matrix[1:i][::-1],pool=multiprocessing) #faster through parallelization
+
+                kernel_matrix[i] += self.dt*np.dot(kernel_matrix[0],va_corr_matrix[i])/2
+                kernel_matrix[i] += np.dot(self.mass_matrix,a_corr_matrix[i]) 
                 kernel_matrix[i] += np.dot(self.kT,aU_corr_matrix[i])
 
-                kernel_matrix[i] = np.matmul(kernel_matrix[i],prefac_mat)
+                kernel_matrix[i] = np.dot(kernel_matrix[i],prefac_mat)
         t = np.arange(0,len(kernel_matrix)*self.dt,self.dt)
+
+        for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim):
+                    ikernel_matrix.T[i][j] = integrate.cumtrapz(kernel_matrix.T[i][j],t,initial=0)
+
+        if correct:
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim):
+                    kernel_matrix.T[i][j] = np.gradient(ikernel_matrix.T[i][j],self.dt)
         
         if self.plot:
             if self.verbose:
@@ -709,5 +908,5 @@ class multi_dim_gle:
 
                 plt.show()
             
-        return v_corr_matrix,va_corr_matrix,a_corr_matrix, vU_corr_matrix, aU_corr_matrix, t, kernel_matrix, force_funcs
+        return t, ikernel_matrix, kernel_matrix
     
