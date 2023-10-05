@@ -63,7 +63,7 @@ class multi_dim_gle:
                 pos2 = pos.T[1]
                 #plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
                 #otherwise not centered
-                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, interpolation='spline16',origin = 'lower',  extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
+origin = 'lower',                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, interpolation='spline16',  extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
                 cbar = plt.colorbar()
                 cbar.set_label(r"$U/k_BT$")
                 plt.xlabel(r'$x_1$')
@@ -175,12 +175,13 @@ class multi_dim_gle:
             #this would induce cross-correlations in the positions (not Mori-GLE)
             #self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(xU_corr_matrix[0]))
             self.k_matrix = np.eye(self.n_dim)
+
             if self.physical:
-                self.k_matrix[0][0] = self.kT/x_corr_matrix[0][0][0]
-                self.k_matrix[1][1] = self.kT/x_corr_matrix[0][1][1]
+                for i in range(self.n_dim):
+                    self.k_matrix[i][i] = self.kT/x_corr_matrix[0][i][i]
             else:
-                self.k_matrix[0][0] = v_corr_matrix[0][0][0]/x_corr_matrix[0][0][0]
-                self.k_matrix[1][1] = v_corr_matrix[0][1][1]/x_corr_matrix[0][1][1]
+                for i in range(self.n_dim):
+                    self.k_matrix[i][i] = v_corr_matrix[0][i][i]/x_corr_matrix[0][i][i]
                 
             if self.verbose:
                 print('k-matrix:')
@@ -674,12 +675,13 @@ class multi_dim_gle:
              #this would induce cross-correlations in the positions (not Mori-GLE)
             #self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(x_corr_matrix[0]))
             self.k_matrix = np.eye(self.n_dim)
+
             if self.physical:
-                self.k_matrix[0][0] = self.kT/x_corr_matrix[0][0][0]
-                self.k_matrix[1][1] = self.kT/x_corr_matrix[0][1][1]
+                for i in range(self.n_dim):
+                    self.k_matrix[i][i] = self.kT/x_corr_matrix[0][i][i]
             else:
-                self.k_matrix[0][0] = v_corr_matrix[0][0][0]/x_corr_matrix[0][0][0]
-                self.k_matrix[1][1] = v_corr_matrix[0][1][1]/x_corr_matrix[0][1][1]
+                for i in range(self.n_dim):
+                    self.k_matrix[i][i] = v_corr_matrix[0][i][i]/x_corr_matrix[0][i][i]
 
             if self.verbose:
                 print('k-matrix:')
@@ -868,7 +870,7 @@ class multi_dim_gle:
         if self.verbose:
             print('extract memory kernel entries...')
         for i in range(1,len(kernel_matrix)):
-            if first_kind:
+            if first_kind:#recommended!!
                 if multiprocessing == 1:
                     kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
                     #kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i],v_corr_matrix[1:i][::-1])
@@ -883,7 +885,7 @@ class multi_dim_gle:
                 kernel_matrix[i] +=np.dot(kernel_matrix[0],v_corr_matrix[i])/2
 
                 kernel_matrix[i] = np.dot(kernel_matrix[i],prefac_mat)*-2
-            else:#recommended!!
+            else:#not so stable
                 prefac_mat = np.linalg.inv(v_corr_matrix[0] - self.dt*0.5*va_corr_matrix[0])
                 if multiprocessing == 1:
                     kernel_matrix[i] += np.einsum('ijk,ikl->jl',kernel_matrix[1:i+1],v_corr_matrix[:i][::-1])
