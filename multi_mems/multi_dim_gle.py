@@ -61,8 +61,11 @@ class multi_dim_gle:
             if self.plot and self.n_dim == 2:
                 pos1 = pos.T[0]
                 pos2 = pos.T[1]
-                plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
-                plt.colorbar()
+                #plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
+                #otherwise not centered
+                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, interpolation='spline16',origin = 'lower',  extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
+                cbar = plt.colorbar()
+                cbar.set_label(r"$U/k_BT$")
                 plt.xlabel(r'$x_1$')
                 plt.ylabel(r'$x_2$')
 
@@ -93,7 +96,8 @@ class multi_dim_gle:
         
         v_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
         xU_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
-        
+        x_corr_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
+
         for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
             for j in range(0,self.n_dim):
                 #v_corr_matrix.T[i][j] = correlation(xvaf['v_' + str(i+1)],xvaf['v_' + str(j+1)])[:tmax]
@@ -166,15 +170,28 @@ class multi_dim_gle:
             
             for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
                 for j in range(0,self.n_dim):
-                    xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+                    x_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
 
-            self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(xU_corr_matrix[0]))
+            #this would induce cross-correlations in the positions (not Mori-GLE)
+            #self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(xU_corr_matrix[0]))
+            self.k_matrix = np.eye(self.n_dim)
+            if self.physical:
+                self.k_matrix[0][0] = self.kT/x_corr_matrix[0][0][0]
+                self.k_matrix[1][1] = self.kT/x_corr_matrix[0][1][1]
+            else:
+                self.k_matrix[0][0] = v_corr_matrix[0][0][0]/x_corr_matrix[0][0][0]
+                self.k_matrix[1][1] = v_corr_matrix[0][1][1]/x_corr_matrix[0][1][1]
+                
             if self.verbose:
-                print('constant k-matrix:') #note we do not use position-dependent masses!!
+                print('k-matrix:')
                 print(self.k_matrix)
 
-            for i in range(tmax):
-                xU_corr_matrix[i] = np.dot(self.k_matrix,xU_corr_matrix[i])
+            #for i in range(tmax):
+                #xU_corr_matrix[i] = np.dot(self.k_matrix,xU_corr_matrix[i])
+            for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
+                for j in range(0,self.n_dim):
+                    xU_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),self.k_matrix[j][j]*(xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)])))[:tmax]
+
                          
         t = np.arange(0,len(v_corr_matrix)*self.dt,self.dt)
         
@@ -382,7 +399,7 @@ class multi_dim_gle:
             pos.T[i] =(hist[1][i][1:]+hist[1][i][:-1])/2
         hist = hist[0]
 
-        fe=-np.log(hist)
+        fe=-np.log(hist) #in units of kT!
         fe[np.where(fe == np.inf)] = np.nanmax(fe[fe != np.inf]) #in general zero
         fe-=np.min(fe)
 
@@ -464,15 +481,15 @@ class multi_dim_gle:
         pos = pos[np.nonzero(hist)]
         hist = hist[np.nonzero(hist)]
         
-        fe=-np.log(hist[np.nonzero(hist)])
-        
+        fe=-np.log(hist[np.nonzero(hist)]) #in units of kT!
+        fe-=np.min(fe)
 
         fe_spline=interpolate.splrep(pos, fe, s=0, per=0)
 
         dxf=pos[1]-pos[0]
         xfine=np.arange(pos[0],pos[-1],dxf/10.)
         fe_fine=interpolate.splev(xfine, fe_spline)
-        force_fine=interpolate.splev(xfine, fe_spline, der=1)
+        #force_fine=interpolate.splev(xfine, fe_spline, der=1)
         force_array=interpolate.splev(x, fe_spline, der=1)
 
         return pos, hist, fe, xfine, fe_fine, force_array
@@ -653,18 +670,30 @@ class multi_dim_gle:
             for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
                 for j in range(0,self.n_dim):
                     x_corr_matrix.T[j][i] = correlation(xvaf['x_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
-                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)],xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
-                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)],xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)]))[:tmax]
+                    
+             #this would induce cross-correlations in the positions (not Mori-GLE)
+            #self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(x_corr_matrix[0]))
+            self.k_matrix = np.eye(self.n_dim)
+            if self.physical:
+                self.k_matrix[0][0] = self.kT/x_corr_matrix[0][0][0]
+                self.k_matrix[1][1] = self.kT/x_corr_matrix[0][1][1]
+            else:
+                self.k_matrix[0][0] = v_corr_matrix[0][0][0]/x_corr_matrix[0][0][0]
+                self.k_matrix[1][1] = v_corr_matrix[0][1][1]/x_corr_matrix[0][1][1]
 
-            self.k_matrix = np.dot(v_corr_matrix[0],np.linalg.inv(x_corr_matrix[0]))
             if self.verbose:
-                print('constant k-matrix:') #note we do not use position-dependent masses!!
+                print('k-matrix:')
                 print(self.k_matrix)
 
-            for i in range(tmax):
-                vU_corr_matrix[i] = np.dot(self.k_matrix,vU_corr_matrix[i])
-                aU_corr_matrix[i] = np.dot(self.k_matrix,aU_corr_matrix[i])
-   
+            #for i in range(tmax):
+                #vU_corr_matrix[i] = np.dot(self.k_matrix,vU_corr_matrix[i])
+                #aU_corr_matrix[i] = np.dot(self.k_matrix,aU_corr_matrix[i])
+            for i in range(0,self.n_dim): #could be possibly accelerated by list comprehension
+                for j in range(0,self.n_dim):
+                    vU_corr_matrix.T[j][i] = correlation(xvaf['v_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),self.k_matrix[j][j]*(xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)])))[:tmax]
+                    aU_corr_matrix.T[j][i] = correlation(xvaf['a_' + str(i+1)]-np.mean(xvaf['x_' + str(i+1)]),self.k_matrix[j][j]*(xvaf['x_' + str(j+1)]-np.mean(xvaf['x_' + str(j+1)])))[:tmax]
+
+                      
         t = np.arange(0,len(v_corr_matrix)*self.dt,self.dt)
         
         if self.symm_matr:
