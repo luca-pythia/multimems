@@ -63,7 +63,7 @@ class multi_dim_gle:
                 pos2 = pos.T[1]
                 #plt.imshow(fe-np.min(fe), cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
                 #otherwise not centered
-origin = 'lower',                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, interpolation='spline16',  extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
+                plt.imshow(fe.T-np.min(fe).T,origin = 'lower',cmap=plt.cm.jet, interpolation='spline16', extent = [np.min(pos1) , np.max(pos1), np.min(pos2) , np.max(pos2)])
                 cbar = plt.colorbar()
                 cbar.set_label(r"$U/k_BT$")
                 plt.xlabel(r'$x_1$')
@@ -256,7 +256,7 @@ origin = 'lower',                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, 
     
     #the memory matrix extraction
     #https://www.pnas.org/doi/abs/10.1073/pnas.2023856118
-    def compute_kernel_mat_G(self,v_corr_matrix,xU_corr_matrix,first_kind = True, d  = 0,multiprocessing=1):
+    def compute_kernel_mat_G(self,v_corr_matrix,xU_corr_matrix,first_kind = True, d  = 0,multiprocessing=1,half_stepped=False):
         tmax=int(self.trunc/self.dt)
         ikernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
         kernel_matrix = np.zeros([tmax,self.n_dim,self.n_dim])
@@ -287,13 +287,62 @@ origin = 'lower',                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, 
         if self.verbose:
             print('constant mass matrix:') #note we do not use position-dependent masses!!
             print(self.mass_matrix)
+
+
+
+        if half_stepped:
+            ikernel_matrix_half = np.zeros([tmax,self.n_dim,self.n_dim])
+            prefac_mat = np.linalg.inv(v_corr_matrix[0]+v_corr_matrix[1])
+
+            ikernel_matrix_half[0] = 2 * (np.dot(self.mass_matrix,(v_corr_matrix[0] - v_corr_matrix[1]))+np.dot(self.kT,xU_corr_matrix[1])-np.dot(self.kT,xU_corr_matrix[0])) / self.dt
+            ikernel_matrix_half[0] = np.dot(ikernel_matrix_half[0],prefac_mat)
+
+            for i in range(1,len(ikernel_matrix_half)-1):
+                if first_kind:
+
+                    if multiprocessing == 1:
+                        ikernel_matrix_half[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix_half[i-1::-1],(v_corr_matrix[1:i+1]+v_corr_matrix[2:i+2]))
+
+                    else:
+                        ikernel_matrix_half[i] -= einsum('ijk,ikl->jl',ikernel_matrix_half[i-1::-1],(v_corr_matrix[1:i+1]+v_corr_matrix[2:i+2]),pool=multiprocessing) #faster through parallelization
+
+                    ikernel_matrix_half[i] += -2*np.dot(self.mass_matrix,(v_corr_matrix[i+1]-v_corr_matrix[0]))/self.dt 
+
+                    ikernel_matrix_half[i] += -2*(np.dot(self.kT,xU_corr_matrix[0])-np.dot(self.kT,xU_corr_matrix[i+1]))/self.dt
+
+                    ikernel_matrix_half[i] = np.matmul(ikernel_matrix_half[i],prefac_mat)
+                else: #not so stable
+
+                    if multiprocessing == 1:
+                        ikernel_matrix_half[i] -= np.einsum('ijk,ikl->jl',ikernel_matrix_half[i-1::-1],(v_corr_matrix[1:i+1]+v_corr_matrix[2:i+2]))
+
+                    else:
+                        ikernel_matrix_half[i] -= einsum('ijk,ikl->jl',ikernel_matrix_half[i-1::-1],(v_corr_matrix[1:i+1]+v_corr_matrix[2:i+2]),pool=multiprocessing) #faster through parallelization
+                    
+                    ikernel_matrix_half[i] -= 2*np.dot(np.dot(self.kT,xU_corr_matrix[0]),np.dot(np.linalg.inv(v_corr_matrix[0]),v_corr_matrix[i+1]))/self.dt
+
+                    ikernel_matrix_half[i] += np.dot(self.kT,xU_corr_matrix[i+1])/self.dt
+
+                    ikernel_matrix_half[i] = np.matmul(ikernel_matrix_half[i],prefac_mat)
+
+            kernel_matrix[0] = 2*ikernel_matrix_half[0]/self.dt
+      
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim): 
+
+                    if d == 1:
+                    
+                        kernel_matrix.T[i][j][1:] = np.diff(ikernel_matrix_half.T[i][j]) / self.dt
+                    else:
+
+                        kernel_matrix.T[i][j]  = np.gradient(ikernel_matrix_half.T[i][j],self.dt)  
+
+        else:
         
+            prefac_mat = np.linalg.inv(v_corr_matrix[0])
         
-        prefac_mat = np.linalg.inv(v_corr_matrix[0])
-       
-        if self.verbose:
-            print('extract memory kernel entries ...')
-        for i in range(1,len(ikernel_matrix)):
+            
+            for i in range(1,len(ikernel_matrix)):
 
 
                 if first_kind:#recommended!!
@@ -335,25 +384,25 @@ origin = 'lower',                plt.imshow(fe.T-np.min(fe).T, cmap=plt.cm.jet, 
 
                     ikernel_matrix[i] = np.matmul(ikernel_matrix[i],prefac_mat)*2
 
-        #calculate memory matrix from ikernel
-        for i in range(0,self.n_dim):
-                    for j in range(0, self.n_dim): 
-                        if d == 1:
-                            for n in range(len(kernel_matrix)-1):
-                                kernel_matrix.T[i][j][n] = (ikernel_matrix.T[i][j][n+1] - ikernel_matrix.T[i][j][n])/self.dt
+            #calculate memory matrix from ikernel
+            for i in range(0,self.n_dim):
+                for j in range(0, self.n_dim): 
+                    if d == 1:
+                        for n in range(len(kernel_matrix)-1):
+                            kernel_matrix.T[i][j][n] = (ikernel_matrix.T[i][j][n+1] - ikernel_matrix.T[i][j][n])/self.dt
+                    
+                    
+                    elif d==2: #predictor-corrector + central difference (https://www.nature.com/articles/s42005-020-0389-0)
+                        #if self.verbose:
+                            #print('use predictor-corrector scheme...')
+                        ikernel_matrix_corrected = ikernel_matrix
+                        for n in range(1,len(kernel_matrix)-1):
+                            ikernel_matrix_corrected.T[i][j][n] = (ikernel_matrix_corrected.T[i][j][n-1] + 3*ikernel_matrix.T[i][j][n] + ikernel_matrix.T[i][j][n+1])/5
                         
-                        
-                        elif d==2: #predictor-corrector + central difference (https://www.nature.com/articles/s42005-020-0389-0)
-                            #if self.verbose:
-                                #print('use predictor-corrector scheme...')
-                            ikernel_matrix_corrected = ikernel_matrix
-                            for n in range(1,len(kernel_matrix)-1):
-                                ikernel_matrix_corrected.T[i][j][n] = (ikernel_matrix_corrected.T[i][j][n-1] + 3*ikernel_matrix.T[i][j][n] + ikernel_matrix.T[i][j][n+1])/5
-                            
-                            kernel_matrix.T[i][j]  = np.gradient(ikernel_matrix_corrected.T[i][j],self.dt)  
-                            ikernel_matrix = ikernel_matrix_corrected
-                        else: #central difference
-                            kernel_matrix.T[i][j]  = np.gradient(ikernel_matrix.T[i][j],self.dt)  
+                        kernel_matrix.T[i][j]  = np.gradient(ikernel_matrix_corrected.T[i][j],self.dt)  
+                        ikernel_matrix = ikernel_matrix_corrected
+                    else: #central difference
+                        kernel_matrix.T[i][j]  = np.gradient(ikernel_matrix.T[i][j],self.dt)  
 
 
 
