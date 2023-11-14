@@ -1,0 +1,8 @@
+cvxopt
+einsumt
+matplotlib
+ndsplines
+numba
+numpy
+pandas
+scipy
