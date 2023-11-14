@@ -11,3 +11,8 @@
 .idea
 .vscode
 
+# environment
+.venv
+.eggs
+multi_mems.egg.info
+build
